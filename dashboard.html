@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Sheet Dashboard - Kasatria</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: Arial, sans-serif; }
+        #menu { position: fixed; bottom: 20px; width: 100%; text-align: center; z-index: 10; }
+        
+
+        .element {
+            width: 140px; height: 180px;
+            box-shadow: 0px 0px 12px rgba(0,255,255,0.5);
+            border: 1px solid rgba(127,255,255,0.25);
+            text-align: center; cursor: default;
+        }
+        .net-worth { position: absolute; top: 10px; right: 10px; font-size: 10px; color: white; font-weight: bold; }
+        .avatar { width: 70px; height: 70px; border-radius: 50%; margin-top: 25px; border: 2px solid white; background: #222; }
+        .name { display: block; font-size: 14px; font-weight: bold; color: #fff; margin-top: 10px; }
+        .details { font-size: 11px; color: rgba(255,255,255,0.8); margin-top: 5px; }
+
+        button {
+            color: cyan; background: transparent; border: 1px solid cyan;
+            padding: 8px 18px; cursor: pointer; margin: 0 5px;
+        }
+        button:hover { background: rgba(0,255,255,0.2); }
+
+        #loading {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: black; color: cyan; display: flex; align-items: center;
+            justify-content: center; z-index: 100; font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="loading">FETCHING DATA...</div>
+<div id="container"></div>
+<div id="menu">
+    <button id="table">TABLE</button>
+    <button id="sphere">SPHERE</button>
+    <button id="helix">HELIX</button>
+    <button id="grid">GRID</button>
+</div>
+
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.158.0/examples/jsm/"
+    }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import TWEEN from 'three/addons/libs/tween.module.js';
+import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
+import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+
+const objects = [];
+const targets = { table: [], sphere: [], helix: [], grid: [] };
+let camera, scene, renderer, controls;
+
+
+const SHEET_ID = '1t0DkbfA7yHp9YEA19ilfF1MasyRRHSO1YBhly7RJHDc';
+const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json`;
+
+fetch(url)
+    .then(res => res.text())
+    .then(text => {
+        const json = JSON.parse(text.substring(47).slice(0, -2));
+        const rows = json.table.rows;
+        
+        const data = rows.map(r => ({
+            name: r.c[0]?.v || "Unknown",
+            photo: r.c[1]?.v || "",
+            age: r.c[2]?.v || "??",
+            country: r.c[3]?.v || "??",
+            interest: r.c[4]?.v || "??",
+            netWorthStr: r.c[5]?.f || r.c[5]?.v || "$0",
+
+            netWorthVal: parseFloat((r.c[5]?.f || r.c[5]?.v || "0").replace(/[$,]/g, ''))
+        }));
+
+        document.getElementById('loading').style.display = 'none';
+        init(data);
+        animate();
+    })
+    .catch(err => {
+        document.getElementById('loading').innerHTML = "Error: Make sure your Sheet is 'Published to Web'";
+        console.error(err);
+    });
+
+function init(data) {
+    camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 10000);
+    camera.position.z = 3000;
+    scene = new THREE.Scene();
+
+    data.forEach((item, i) => {
+        const el = document.createElement('div');
+        el.className = 'element';
+        
+
+        if (item.netWorthVal < 100000) el.style.backgroundColor = 'rgba(239, 48, 34, 0.7)'; 
+        else if (item.netWorthVal > 200000) el.style.backgroundColor = 'rgba(0, 255, 0, 0.5)'; 
+        else el.style.backgroundColor = 'rgba(255, 165, 0, 0.7)'; 
+
+        el.innerHTML = `
+            <div class="net-worth">${item.netWorthStr}</div>
+            <img class="avatar" src="${item.photo}">
+            <div class="name">${item.name}</div>
+            <div class="details">${item.age} | ${item.country}<br>${item.interest}</div>
+        `;
+
+        const obj = new CSS3DObject(el);
+        obj.position.set(Math.random()*4000-2000, Math.random()*4000-2000, Math.random()*4000-2000);
+        scene.add(obj);
+        objects.push(obj);
+
+
+        const tObj = new THREE.Object3D();
+        tObj.position.x = ((i % 20) * 160) - 1500;
+        tObj.position.y = -(Math.floor(i / 20) * 200) + 800;
+        targets.table.push(tObj);
+    });
+
+
+    const vector = new THREE.Vector3();
+    for (let i = 0; i < objects.length; i++) {
+        const phi = Math.acos(-1 + (2 * i) / objects.length);
+        const theta = Math.sqrt(objects.length * Math.PI) * phi;
+        const sObj = new THREE.Object3D();
+        sObj.position.setFromSphericalCoords(800, phi, theta);
+        vector.copy(sObj.position).multiplyScalar(2);
+        sObj.lookAt(vector);
+        targets.sphere.push(sObj);
+    }
+
+
+    for (let i = 0; i < objects.length; i++) {
+        const hObj = new THREE.Object3D();
+        const strand = (i % 2 === 0) ? 0 : Math.PI;
+        const theta = i * 0.175 + strand;
+        const y = -(i * 8) + 450;
+        hObj.position.setFromCylindricalCoords(900, theta, y);
+        vector.x = hObj.position.x * 2; vector.y = hObj.position.y; vector.z = hObj.position.z * 2;
+        hObj.lookAt(vector);
+        targets.helix.push(hObj);
+    }
+
+
+    for (let i = 0; i < objects.length; i++) {
+        const gObj = new THREE.Object3D();
+        gObj.position.x = ((i % 5) * 400) - 800;
+        gObj.position.y = (-(Math.floor(i / 5) % 4) * 400) + 600;
+        gObj.position.z = (Math.floor(i / 20)) * -800 + 500;
+        targets.grid.push(gObj);
+    }
+
+    renderer = new CSS3DRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById('container').appendChild(renderer.domElement);
+
+    controls = new TrackballControls(camera, renderer.domElement);
+    
+    // Bind Buttons
+    document.getElementById('table').onclick = () => transform(targets.table, 2000);
+    document.getElementById('sphere').onclick = () => transform(targets.sphere, 2000);
+    document.getElementById('helix').onclick = () => transform(targets.helix, 2000);
+    document.getElementById('grid').onclick = () => transform(targets.grid, 2000);
+
+    transform(targets.table, 2000);
+    window.addEventListener('resize', onWindowResize);
+}
+
+function transform(target, duration) {
+    TWEEN.removeAll();
+    objects.forEach((obj, i) => {
+        const targetObj = target[i];
+        new TWEEN.Tween(obj.position).to(targetObj.position, duration).easing(TWEEN.Easing.Exponential.InOut).start();
+        new TWEEN.Tween(obj.rotation).to(targetObj.rotation, duration).easing(TWEEN.Easing.Exponential.InOut).start();
+    });
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    TWEEN.update();
+    controls.update();
+    renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>
